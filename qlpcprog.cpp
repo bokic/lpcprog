@@ -171,7 +171,7 @@ void QLpcProg::setCrystalValue(int value)
 
     if (m_EchoOn)
     {
-        shouldRecieve = send.append("OK\r\n");
+        shouldRecieve = send + "OK\r\n";
     }
     else
     {
@@ -290,9 +290,9 @@ void QLpcProg::setEcho(bool echo)
 
             lines = recieved.split('\n');
 
-            if ((lines.count() == 4)&&(m_EchoOn == true))
+            if ((lines.count() == 3)&&(m_EchoOn == true))
             {
-                line = lines.at(2);
+                line = lines.at(1);
                 line.chop(1); // chop \r
 
                 if (line == "0")
@@ -1047,6 +1047,8 @@ int QLpcProg::encodeUUCheckSum(const QByteArray &data)
 
 void QLpcProg::log_write(const QByteArray &data)
 {
+    Q_UNUSED(data);
+
     /*QFile log("write.log");
 
     log.open(QIODevice::Append);

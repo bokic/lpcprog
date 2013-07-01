@@ -103,8 +103,8 @@ QByteArray QHexLoader::data()
     QByteArray ret;
 
     quint16 page = 0;
-    bool unknown = false;
-    bool last = false;
+    //bool unknown = false;
+    //bool last = false;
     int pos;
 
     ret.reserve(512 * 1024); // Preallocate maximum size.
@@ -122,9 +122,9 @@ QByteArray QHexLoader::data()
                 ret[pos + c] = row.m_Data.at(c);
             }
             break;
-        case 1:
-            last = true;
-            break;
+        //case 1:
+        //    last = true;
+        //    break;
         case 4:
             if (row.m_Data.count() != 2)
             {
@@ -133,8 +133,8 @@ QByteArray QHexLoader::data()
 
             page = (row.m_Data.at(0) << 8)|(row.m_Data.at(1) << 0);
             break;
-        case 5:
-            unknown = true; // TODO: Unknown hex line.
+        //case 5:
+        //    unknown = true; // TODO: Unknown hex line.
             break;
         default:
             return QByteArray();

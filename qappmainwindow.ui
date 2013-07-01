@@ -27,6 +27,9 @@
     </item>
     <item row="8" column="0">
      <widget class="QPushButton" name="save_pushButton">
+      <property name="enabled">
+       <bool>false</bool>
+      </property>
       <property name="toolTip">
        <string>Save chip firmware to file</string>
       </property>
@@ -50,6 +53,9 @@
     </item>
     <item row="9" column="0">
      <widget class="QPushButton" name="decompile_pushButton">
+      <property name="enabled">
+       <bool>false</bool>
+      </property>
       <property name="toolTip">
        <string>Read and decompile chip firmware</string>
       </property>
@@ -94,6 +100,9 @@
          </item>
          <item>
           <widget class="QRadioButton" name="fileVerify_radioButton">
+           <property name="enabled">
+            <bool>false</bool>
+           </property>
            <property name="toolTip">
             <string>Select to verify chip firmware to hex file</string>
            </property>
@@ -104,6 +113,9 @@
          </item>
          <item>
           <widget class="QRadioButton" name="fileDecompile_radioButton">
+           <property name="enabled">
+            <bool>false</bool>
+           </property>
            <property name="toolTip">
             <string>Select to decompile hex file</string>
            </property>
@@ -225,6 +237,9 @@
     </item>
     <item row="7" column="0">
      <widget class="QPushButton" name="read_pushButton">
+      <property name="enabled">
+       <bool>false</bool>
+      </property>
       <property name="toolTip">
        <string>Read chip firmware and display the content</string>
       </property>
