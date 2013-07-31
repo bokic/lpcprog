@@ -1,6 +1,6 @@
 #include "qlpcprog.h"
 
-#include <QSerialPortInfo>
+#include <qserialportinfo.h>
 #include <QFile>
 
 #ifdef Q_OS_WIN
@@ -9,8 +9,8 @@
 #include <unistd.h>
 #endif
 
-const char SYNCHRONIZED[] = "Synchronized\r\n";
-const char SYNCHRONIZED_OK[] = "Synchronized\r\nOK\r\n";
+static const char SYNCHRONIZED[] = "Synchronized\r\n";
+static const char SYNCHRONIZED_OK[] = "Synchronized\r\nOK\r\n";
 
 
 QLpcProg::QLpcProg(QObject *parent) :
@@ -507,7 +507,7 @@ void QLpcProg::unlock()
         }
     }
 
-    if (line != "0")
+    if ((line != "OK")&&(line != "0"))
     {
         m_status = StatusError;
         m_statusText = tr("Wrong data recieved(%1).").arg(QString(line));
@@ -547,87 +547,88 @@ void QLpcProg::chipErase()
     case LPC2148:
         send = "26";
         break;
+    default:
+        // TODO:
+        return;
     }
 
-    if (!send.isEmpty())
+    /// Unlock commands
+    unlock();
+    if (m_status != StatusNoError)
     {
-        unlock();
-        if (m_status != StatusNoError)
-        {
-            return;
-        }
-
-        /// Prepare for erase
-        m_port.write("P 0 " + send + "\r\n");
-        log_write("P 0 " + send + "\r\n");
-        for(int c = 0; c < 1000; c++)
-        {
-            m_port.waitForReadyRead(1);
-            recieved.append(m_port.readAll());
-
-            QList<QByteArray> lines = recieved.split('\n');
-
-            if ((lines.count() >= 3)&&(m_EchoOn == true))
-            {
-                line = lines[1];
-                line.chop(1);
-
-                break;
-            }
-            if ((lines.count() >= 2)&&(m_EchoOn == false))
-            {
-                line = lines[0];
-                line.chop(1);
-
-                break;
-            }
-        }
-
-        if (line != "0")
-        {
-            m_status = StatusError;
-            m_statusText = tr("Wrong data recieved(%1).").arg(QString(line));
-
-            return;
-        }
-
-        /// Erase
-        m_port.write("E 0 " + send + "\r\n");
-        log_write("E 0 " + send + "\r\n");
-        for(int c = 0; c < 1000; c++)
-        {
-            m_port.waitForReadyRead(1);
-            recieved.append(m_port.readAll());
-
-            QList<QByteArray> lines = recieved.split('\n');
-
-            if ((lines.count() >= 3)&&(m_EchoOn == true))
-            {
-                line = lines[1];
-                line.chop(1);
-
-                break;
-            }
-            if ((lines.count() >= 2)&&(m_EchoOn == false))
-            {
-                line = lines[0];
-                line.chop(1);
-
-                break;
-            }
-        }
-
-        if (line != "0")
-        {
-            m_status = StatusError;
-            m_statusText = tr("Wrong data recieved(%1).").arg(QString(line));
-
-            return;
-        }
-
-        m_status = StatusNoError;
-        m_statusText.clear();
+        return;
     }
+
+    /// Prepare for erase
+    m_port.write("P 0 " + send + "\r\n");
+    log_write("P 0 " + send + "\r\n");
+    for(int c = 0; c < 1000; c++)
+    {
+        m_port.waitForReadyRead(1);
+        recieved.append(m_port.readAll());
+
+        QList<QByteArray> lines = recieved.split('\n');
+
+        if ((lines.count() >= 3)&&(m_EchoOn == true))
+        {
+            line = lines[1];
+            line.chop(1);
+
+            break;
+        }
+        if ((lines.count() >= 2)&&(m_EchoOn == false))
+        {
+            line = lines[0];
+            line.chop(1);
+
+            break;
+        }
+    }
+
+    if (line != "0")
+    {
+        m_status = StatusError;
+        m_statusText = tr("Wrong data recieved(%1).").arg(QString(line));
+
+        return;
+    }
+
+    /// Erase
+    m_port.write("E 0 " + send + "\r\n");
+    log_write("E 0 " + send + "\r\n");
+    for(int c = 0; c < 1000; c++)
+    {
+        m_port.waitForReadyRead(1);
+        recieved.append(m_port.readAll());
+
+        QList<QByteArray> lines = recieved.split('\n');
+
+        if ((lines.count() >= 3)&&(m_EchoOn == true))
+        {
+            line = lines[1];
+            line.chop(1);
+
+            break;
+        }
+        if ((lines.count() >= 2)&&(m_EchoOn == false))
+        {
+            line = lines[0];
+            line.chop(1);
+
+            break;
+        }
+    }
+
+    if (line != "0")
+    {
+        m_status = StatusError;
+        m_statusText = tr("Wrong data recieved(%1).").arg(QString(line));
+
+        return;
+    }
+
+    m_status = StatusNoError;
+    m_statusText.clear();
 }
 
 bool QLpcProg::chipBlankCheck()
@@ -766,18 +767,12 @@ void QLpcProg::chipProgram(QByteArray chunk, int offset)
     QByteArray recieved;
     QByteArray line;
 
-    unlock();
-    if (m_status != StatusNoError)
-    {
-        return;
-    }
-
     encoded = encodeUU(chunk1);
 
     m_port.write("W 1073742336 512\r\n");
     log_write("W 1073742336 512\r\n");
 
-    m_port.waitForBytesWritten(-1);
+   m_port.waitForBytesWritten(-1);
 
     recieved.clear();
     line.clear();
@@ -818,41 +813,6 @@ void QLpcProg::chipProgram(QByteArray chunk, int offset)
         log_write(line);
     }
 
-    m_port.waitForBytesWritten(-1);
-
-    recieved.clear();
-    line.clear();
-    for(int c = 0; c < 1000; c++)
-    {
-        m_port.waitForReadyRead(1);
-        recieved.append(m_port.readAll());
-
-        QList<QByteArray> lines = recieved.split('\n');
-
-        if ((lines.count() >= 3)&&(m_EchoOn == true))
-        {
-            line = lines[1];
-            line.chop(1);
-
-            break;
-        }
-        if ((lines.count() >= 2)&&(m_EchoOn == false))
-        {
-            line = lines[0];
-            line.chop(1);
-
-            break;
-        }
-    }
-
-    if (line != "0")
-    {
-        m_status = StatusError;
-        m_statusText = tr("Wrong data recieved(%1).").arg(QString(line));
-
-        return;
-    }
-
     m_port.write(QByteArray::number(encodeUUCheckSum(chunk1)).append("\r\n"));
     log_write(QByteArray::number(encodeUUCheckSum(chunk1)).append("\r\n"));
 
@@ -888,12 +848,6 @@ void QLpcProg::chipProgram(QByteArray chunk, int offset)
         m_status = StatusError;
         m_statusText = tr("Wrong data recieved(%1).").arg(QString(line));
 
-        return;
-    }
-
-    unlock();
-    if (m_status != StatusNoError)
-    {
         return;
     }
 
@@ -942,39 +896,6 @@ void QLpcProg::chipProgram(QByteArray chunk, int offset)
         m_port.write(line.append("\r\n"));
         m_port.waitForBytesWritten(-1);
         log_write(line);
-    }
-
-    recieved.clear();
-    line.clear();
-    for(int c = 0; c < 1000; c++)
-    {
-        m_port.waitForReadyRead(1);
-        recieved.append(m_port.readAll());
-
-        QList<QByteArray> lines = recieved.split('\n');
-
-        if ((lines.count() >= 3)&&(m_EchoOn == true))
-        {
-            line = lines[1];
-            line.chop(1);
-
-            break;
-        }
-        if ((lines.count() >= 2)&&(m_EchoOn == false))
-        {
-            line = lines[0];
-            line.chop(1);
-
-            break;
-        }
-    }
-
-    if (line != "0")
-    {
-        m_status = StatusError;
-        m_statusText = tr("Wrong data recieved(%1).").arg(QString(line));
-
-        return;
     }
 
     m_port.write(QByteArray::number(encodeUUCheckSum(chunk2)).append("\r\n"));
@@ -1045,7 +966,7 @@ void QLpcProg::chipProgram(QByteArray chunk, int offset)
         }
     }
 
-    if (line != "0")
+    if ((line != "OK")&&(line != "0"))
     {
         m_status = StatusError;
         m_statusText = tr("Wrong data recieved(%1).").arg(QString(line));

@@ -1,7 +1,7 @@
 #ifndef QLPCPROG_H
 #define QLPCPROG_H
 
-#include <QSerialPort>
+#include <qserialport.h>
 #include <QStringList>
 #include <QObject>
 

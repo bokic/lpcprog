@@ -41,6 +41,7 @@ QAppMainWindow::~QAppMainWindow()
     m_SerialPortTimer = 0;
 
     delete ui;
+	ui = 0;
 }
 
 void QAppMainWindow::timerEvent(QTimerEvent *event)
@@ -319,7 +320,7 @@ void QAppMainWindow::on_erase_pushButton_clicked()
         return;
     }
 
-    if (QMessageBox::question(this, tr("Question"), tr("Are you sure you want to erase the chip?")) != QMessageBox::Yes)
+    if (QMessageBox::question(this, tr("Question"), tr("Are you sure you want to erase the chip?"), QMessageBox::Yes, QMessageBox::No) != QMessageBox::Yes)
     {
         return;
     }
@@ -547,7 +548,7 @@ void QAppMainWindow::fileProgram(const QString &file)
         return;
     }
 
-    if (QMessageBox::question(this, tr("Question"), tr("Are you sure you want to reprogram the chip?")) != QMessageBox::Yes)
+    if (QMessageBox::question(this, tr("Question"), tr("Are you sure you want to reprogram the chip?"), QMessageBox::Yes, QMessageBox::No) != QMessageBox::Yes)
     {
         return;
     }
@@ -646,22 +647,6 @@ void QAppMainWindow::fileProgram(const QString &file)
         return;
     }
 
-    /*prog.unlock();
-    switch (prog.getStatus())
-    {
-    case QLpcProg::StatusNoError:
-        break;
-    case QLpcProg::StatusTimeOut:
-        QMessageBox::critical(this, tr("Error"), tr("LPC unlock timeout."));
-        return;
-    case QLpcProg::StatusError:
-        QMessageBox::critical(this, tr("Error"), tr("LPC unlock failed.\n Error string: %1.").arg(prog.getStatusText()));
-        return;
-    default:
-        QMessageBox::critical(this, tr("Error"), tr("LPC unlock failed(unknown error type).\n Error string: %1.").arg(prog.getStatusText()));
-        return;
-    }*/
-
     // patch the firmware.
     prog.patchFirmware(data);
 
@@ -679,7 +664,7 @@ void QAppMainWindow::fileProgram(const QString &file)
 
         if (prog.getStatus() != QLpcProg::StatusNoError)
         {
-            QMessageBox::critical(this, tr("Error"), tr("Programming failed."));
+            QMessageBox::critical(this, tr("Error"), tr("Programming failed(%1).").arg(prog.getStatusText()));
 
             return;
         }
@@ -793,21 +778,6 @@ void QAppMainWindow::fileVerify(const QString &file)
         return;
     }*/
 
-    prog.unlock();
-    switch (prog.getStatus())
-    {
-    case QLpcProg::StatusNoError:
-        break;
-    case QLpcProg::StatusTimeOut:
-        QMessageBox::critical(this, tr("Error"), tr("LPC unlock timeout."));
-        return;
-    case QLpcProg::StatusError:
-        QMessageBox::critical(this, tr("Error"), tr("LPC unlock failed.\n Error string: %1.").arg(prog.getStatusText()));
-        return;
-    default:
-        QMessageBox::critical(this, tr("Error"), tr("LPC unlock failed(unknown error type).\n Error string: %1.").arg(prog.getStatusText()));
-        return;
-    }
 
     // patch the firmware.
     prog.patchFirmware(data);
@@ -818,7 +788,7 @@ void QAppMainWindow::fileVerify(const QString &file)
 
     for(int c = 0; c < chunks; c++)
     {
-        ui->statusbar->showMessage(tr("Verify (%1% complete).").arg(((chunks - c - 1) * 100) / chunks), STATUSBAR_TIMEOUT);
+        ui->statusbar->showMessage(tr("Verify (%1% complete).").arg((c * 100) / chunks), STATUSBAR_TIMEOUT);
         QApplication::processEvents();
 
         if (c != 0) // Do not verify first 32 bytes.
@@ -834,16 +804,21 @@ void QAppMainWindow::fileVerify(const QString &file)
 
         if (prog.getStatus() != QLpcProg::StatusNoError)
         {
-            QMessageBox::critical(this, tr("Error"), tr("Verify failed."));
+            QMessageBox::warning(this, tr("Verify Failed"), tr("Chip firmware <b>does not match</b> file."));
 
-            return;
+            break;
+        }
+        else
+        {
+            QMessageBox::information(this, tr("Verify Successfull"), tr("Chip firmware <b>matches</b> file."));
+
+            break;
         }
     }
 
     prog.deinit();
 
     ui->statusbar->clearMessage();
-    QMessageBox::information(this, tr("Info"), tr("Chip firmware is successfully verified with file."));
 }
 
 void QAppMainWindow::fileDecompile(const QString &file)
