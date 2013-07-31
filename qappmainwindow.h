@@ -24,6 +24,7 @@ private slots:
     void on_fileBrowse_toolButton_clicked();
     void on_fileOperation_pushButton_clicked();
     void on_erase_pushButton_clicked();
+    void on_blankCheck_pushButton_clicked();
     void on_read_pushButton_clicked();
     void on_decompile_pushButton_clicked();
     void on_file_lineEdit_textChanged(const QString &text);

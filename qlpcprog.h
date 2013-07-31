@@ -24,8 +24,10 @@ public:
     void unlock();
 
     void chipErase();
+    bool chipBlankCheck();
     void patchFirmware(QByteArray &data);
     void chipProgram(QByteArray chunk, int offset);
+    void chipVerify(QByteArray chunk, int offset);
 
     Status getStatus();
     QString getStatusText();

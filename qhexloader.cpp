@@ -125,6 +125,9 @@ QByteArray QHexLoader::data()
         case 1:
             last = true;
             break;
+        case 3:
+            unknown = true; // TODO: Unknown hex line.
+            break;
         case 4:
             if (row.m_Data.count() != 2)
             {

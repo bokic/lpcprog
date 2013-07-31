@@ -57,7 +57,7 @@ void QLpcProg::init(const QString &port)
 
     m_port.setBaudRate(QSerialPort::Baud9600);
     m_port.setDataBits(QSerialPort::Data8);
-    m_port.setStopBits(QSerialPort::OneStop);
+    m_port.setStopBits(QSerialPort::TwoStop);
     m_port.setParity(QSerialPort::NoParity);
     m_port.setFlowControl(QSerialPort::SoftwareControl);
 
@@ -83,6 +83,8 @@ void QLpcProg::init(const QString &port)
 
     m_port.write("?");
     log_write("?");
+
+    m_port.waitForBytesWritten(-1);
 
     recieved.clear();
     for(int c = 0; c < 1000; c++)
@@ -214,11 +216,10 @@ void QLpcProg::setBaudRate(int baudRate)
     }
 
     QByteArray recieved;
-    QList<QByteArray> lines;
     QByteArray line;
 
-    m_port.write("B " + QByteArray::number(baudRate) + " 1\r\n");
-    log_write("B " + QByteArray::number(baudRate) + " 1\r\n");
+    m_port.write("B " + QByteArray::number(baudRate) + " 2\r\n");
+    log_write("B " + QByteArray::number(baudRate) + " 2\r\n");
     for(int c = 0; c < 1000; c++)
     {
         m_port.waitForReadyRead(1);
@@ -250,7 +251,13 @@ void QLpcProg::setBaudRate(int baudRate)
         return;
     }
 
-    m_port.setBaudRate(baudRate);
+    if (m_port.setBaudRate(baudRate) == false)
+    {
+        m_status = StatusError;
+        m_statusText = tr("Can\'t change baudrate. Internal error(%1).").arg(QString(m_port.errorString()));
+
+        return;
+    }
 
     m_status = StatusNoError;
     m_statusText.clear();
@@ -623,6 +630,92 @@ void QLpcProg::chipErase()
     }
 }
 
+bool QLpcProg::chipBlankCheck()
+{
+    if (!m_port.isOpen())
+    {
+        m_status = StatusError;
+        m_statusText = tr("Comm port is not open.");
+
+        return false;
+    }
+
+    QByteArray recieved;
+    QByteArray send;
+    QByteArray line;
+
+    switch(readPartID())
+    {
+    case LPC2141:
+        send = "7";
+        break;
+    case LPC2142:
+        send = "8";
+        break;
+    case LPC2144:
+        send = "10";
+        break;
+    case LPC2146:
+        send = "14";
+        break;
+    case LPC2148:
+        send = "26";
+        break;
+    default:
+        // TODO:
+        return false;
+    }
+
+    // Blank check
+    m_port.write("I 1 " + send + "\r\n"); // Skip first sector according UM10139 chapter 21.8.10
+    log_write("I 1 " + send + "\r\n");
+
+    m_port.waitForBytesWritten(-1);
+
+    for(int c = 0; c < 1000; c++)
+    {
+        m_port.waitForReadyRead(1);
+        recieved.append(m_port.readAll());
+
+        QList<QByteArray> lines = recieved.split('\n');
+
+        if ((lines.count() >= 3)&&(m_EchoOn == true))
+        {
+            line = lines[1];
+            line.chop(1);
+
+            break;
+        }
+        if ((lines.count() >= 2)&&(m_EchoOn == false))
+        {
+            line = lines[0];
+            line.chop(1);
+
+            break;
+        }
+    }
+
+    if ((line != "0")&&(line != "8"))
+    {
+        m_status = StatusError;
+        m_statusText = tr("Wrong data recieved(%1).").arg(QString(line));
+
+        return false;
+    }
+
+    m_status = StatusNoError;
+    m_statusText.clear();
+
+    if (line == "8")
+    {
+        return false;
+    }
+
+    // Now check the first sector.
+
+    return true;
+}
+
 void QLpcProg::patchFirmware(QByteArray &data)
 {
     quint32 *vectors = (quint32 *)data.data();
@@ -673,12 +766,21 @@ void QLpcProg::chipProgram(QByteArray chunk, int offset)
     QByteArray recieved;
     QByteArray line;
 
+    unlock();
+    if (m_status != StatusNoError)
+    {
+        return;
+    }
+
     encoded = encodeUU(chunk1);
 
     m_port.write("W 1073742336 512\r\n");
     log_write("W 1073742336 512\r\n");
 
+    m_port.waitForBytesWritten(-1);
+
     recieved.clear();
+    line.clear();
     for(int c = 0; c < 1000; c++)
     {
         m_port.waitForReadyRead(1);
@@ -716,7 +818,10 @@ void QLpcProg::chipProgram(QByteArray chunk, int offset)
         log_write(line);
     }
 
+    m_port.waitForBytesWritten(-1);
+
     recieved.clear();
+    line.clear();
     for(int c = 0; c < 1000; c++)
     {
         m_port.waitForReadyRead(1);
@@ -751,7 +856,368 @@ void QLpcProg::chipProgram(QByteArray chunk, int offset)
     m_port.write(QByteArray::number(encodeUUCheckSum(chunk1)).append("\r\n"));
     log_write(QByteArray::number(encodeUUCheckSum(chunk1)).append("\r\n"));
 
+    m_port.waitForBytesWritten(-1);
+
     recieved.clear();
+    line.clear();
+    for(int c = 0; c < 1000; c++)
+    {
+        m_port.waitForReadyRead(1);
+        recieved.append(m_port.readAll());
+
+        QList<QByteArray> lines = recieved.split('\n');
+
+        if ((lines.count() >= 3)&&(m_EchoOn == true))
+        {
+            line = lines[1];
+            line.chop(1);
+
+            break;
+        }
+        if ((lines.count() >= 2)&&(m_EchoOn == false))
+        {
+            line = lines[0];
+            line.chop(1);
+
+            break;
+        }
+    }
+
+    if ((line != "OK")&&(line != "0"))
+    {
+        m_status = StatusError;
+        m_statusText = tr("Wrong data recieved(%1).").arg(QString(line));
+
+        return;
+    }
+
+    unlock();
+    if (m_status != StatusNoError)
+    {
+        return;
+    }
+
+    encoded = encodeUU(chunk2);
+
+    m_port.write("W 1073742848 512\r\n");
+    log_write("W 1073742848 512\r\n");
+
+    m_port.waitForBytesWritten(-1);
+
+    recieved.clear();
+    line.clear();
+    for(int c = 0; c < 1000; c++)
+    {
+        m_port.waitForReadyRead(1);
+        recieved.append(m_port.readAll());
+
+        QList<QByteArray> lines = recieved.split('\n');
+
+        if ((lines.count() >= 3)&&(m_EchoOn == true))
+        {
+            line = lines[1];
+            line.chop(1);
+
+            break;
+        }
+        if ((lines.count() >= 2)&&(m_EchoOn == false))
+        {
+            line = lines[0];
+            line.chop(1);
+
+            break;
+        }
+    }
+
+    if (line != "0")
+    {
+        m_status = StatusError;
+        m_statusText = tr("Wrong data recieved(%1).").arg(QString(line));
+
+        return;
+    }
+
+    foreach(QByteArray line, encoded)
+    {
+        m_port.write(line.append("\r\n"));
+        m_port.waitForBytesWritten(-1);
+        log_write(line);
+    }
+
+    recieved.clear();
+    line.clear();
+    for(int c = 0; c < 1000; c++)
+    {
+        m_port.waitForReadyRead(1);
+        recieved.append(m_port.readAll());
+
+        QList<QByteArray> lines = recieved.split('\n');
+
+        if ((lines.count() >= 3)&&(m_EchoOn == true))
+        {
+            line = lines[1];
+            line.chop(1);
+
+            break;
+        }
+        if ((lines.count() >= 2)&&(m_EchoOn == false))
+        {
+            line = lines[0];
+            line.chop(1);
+
+            break;
+        }
+    }
+
+    if (line != "0")
+    {
+        m_status = StatusError;
+        m_statusText = tr("Wrong data recieved(%1).").arg(QString(line));
+
+        return;
+    }
+
+    m_port.write(QByteArray::number(encodeUUCheckSum(chunk2)).append("\r\n"));
+    log_write(QByteArray::number(encodeUUCheckSum(chunk2)).append("\r\n"));
+
+    m_port.waitForBytesWritten(-1);
+
+    recieved.clear();
+    line.clear();
+    for(int c = 0; c < 1000; c++)
+    {
+        m_port.waitForReadyRead(1);
+        recieved.append(m_port.readAll());
+
+        QList<QByteArray> lines = recieved.split('\n');
+
+        if ((lines.count() >= 3)&&(m_EchoOn == true))
+        {
+            line = lines[1];
+            line.chop(1);
+
+            break;
+        }
+        if ((lines.count() >= 2)&&(m_EchoOn == false))
+        {
+            line = lines[0];
+            line.chop(1);
+
+            break;
+        }
+    }
+
+    if ((line != "OK")&&(line != "0"))
+    {
+        m_status = StatusError;
+        m_statusText = tr("Wrong data recieved(%1).").arg(QString(line));
+
+        return;
+    }
+
+    m_port.write("P 0 26\r\n"); // TODO: Hardcoded 26(will only work with LPC2148)
+    log_write("P 0 26\r\n"); // TODO: Hardcoded 26(will only work with LPC2148)
+
+    m_port.waitForBytesWritten(-1);
+
+    recieved.clear();
+    line.clear();
+    for(int c = 0; c < 1000; c++)
+    {
+        m_port.waitForReadyRead(1);
+        recieved.append(m_port.readAll());
+
+        QList<QByteArray> lines = recieved.split('\n');
+
+        if ((lines.count() >= 3)&&(m_EchoOn == true))
+        {
+            line = lines[1];
+            line.chop(1);
+
+            break;
+        }
+        if ((lines.count() >= 2)&&(m_EchoOn == false))
+        {
+            line = lines[0];
+            line.chop(1);
+
+            break;
+        }
+    }
+
+    if (line != "0")
+    {
+        m_status = StatusError;
+        m_statusText = tr("Wrong data recieved(%1).").arg(QString(line));
+
+        return;
+    }
+
+    m_port.write("C " + QByteArray::number(offset) + " 1073742336 1024\r\n");
+    log_write("C " + QByteArray::number(offset) + " 1073742336 1024\r\n");
+
+    m_port.waitForBytesWritten(-1);
+
+    recieved.clear();
+    line.clear();
+    for(int c = 0; c < 1000; c++)
+    {
+        m_port.waitForReadyRead(1);
+        recieved.append(m_port.readAll());
+
+        QList<QByteArray> lines = recieved.split('\n');
+
+        if ((lines.count() >= 3)&&(m_EchoOn == true))
+        {
+            line = lines[1];
+            line.chop(1);
+
+            break;
+        }
+        if ((lines.count() >= 2)&&(m_EchoOn == false))
+        {
+            line = lines[0];
+            line.chop(1);
+
+            break;
+        }
+    }
+
+    if (line != "0")
+    {
+        m_status = StatusError;
+        m_statusText = tr("Wrong data recieved(%1).").arg(QString(line));
+
+        return;
+    }
+
+    return;
+}
+
+void QLpcProg::chipVerify(QByteArray chunk, int offset)
+{
+    int orig_size = chunk.length();
+
+    if (!m_port.isOpen())
+    {
+        m_status = StatusError;
+        m_statusText = tr("Comm port is not open.");
+
+        return;
+    }
+
+    if (chunk.length() > 1024)
+    {
+        m_status = StatusError;
+        m_statusText = tr("Programming buffer too big. Length is %1. It should be less or equal to 1024 bytes.").arg(QString(chunk.length()));
+
+        return;
+    }
+
+    if (chunk.length() < 1024)
+    {
+        QByteArray new_chunk;
+        new_chunk.resize(1024 - chunk.length());
+        new_chunk.fill(255);
+
+        chunk.append(new_chunk);
+    }
+
+    const QByteArray &chunk1 = chunk.left(512);
+    const QByteArray &chunk2 = chunk.right(512);
+
+    QList<QByteArray> encoded;
+    QByteArray recieved;
+    QByteArray line;
+
+    encoded = encodeUU(chunk1);
+
+    m_port.write("W 1073742336 512\r\n");
+    log_write("W 1073742336 512\r\n");
+
+    m_port.waitForBytesWritten(-1);
+
+    recieved.clear();
+    line.clear();
+    for(int c = 0; c < 1000; c++)
+    {
+        m_port.waitForReadyRead(1);
+        recieved.append(m_port.readAll());
+
+        QList<QByteArray> lines = recieved.split('\n');
+
+        if ((lines.count() >= 3)&&(m_EchoOn == true))
+        {
+            line = lines[1];
+            line.chop(1);
+
+            break;
+        }
+        if ((lines.count() >= 2)&&(m_EchoOn == false))
+        {
+            line = lines[0];
+            line.chop(1);
+
+            break;
+        }
+    }
+
+    if (line != "0")
+    {
+        m_status = StatusError;
+        m_statusText = tr("Wrong data recieved(%1).").arg(QString(line));
+
+        return;
+    }
+
+    foreach(QByteArray line, encoded)
+    {
+        m_port.write(line.append("\r\n"));
+        log_write(line);
+    }
+
+    m_port.waitForBytesWritten(-1);
+
+    recieved.clear();
+    line.clear();
+    for(int c = 0; c < 1000; c++)
+    {
+        m_port.waitForReadyRead(1);
+        recieved.append(m_port.readAll());
+
+        QList<QByteArray> lines = recieved.split('\n');
+
+        if ((lines.count() >= 3)&&(m_EchoOn == true))
+        {
+            line = lines[1];
+            line.chop(1);
+
+            break;
+        }
+        if ((lines.count() >= 2)&&(m_EchoOn == false))
+        {
+            line = lines[0];
+            line.chop(1);
+
+            break;
+        }
+    }
+
+    if (line != "0")
+    {
+        m_status = StatusError;
+        m_statusText = tr("Wrong data recieved(%1).").arg(QString(line));
+
+        return;
+    }
+
+    m_port.write(QByteArray::number(encodeUUCheckSum(chunk1)).append("\r\n"));
+    log_write(QByteArray::number(encodeUUCheckSum(chunk1)).append("\r\n"));
+
+    m_port.waitForBytesWritten(-1);
+
+    recieved.clear();
+    line.clear();
     for(int c = 0; c < 1000; c++)
     {
         m_port.waitForReadyRead(1);
@@ -788,7 +1254,10 @@ void QLpcProg::chipProgram(QByteArray chunk, int offset)
     m_port.write("W 1073742848 512\r\n");
     log_write("W 1073742848 512\r\n");
 
+    m_port.waitForBytesWritten(-1);
+
     recieved.clear();
+    line.clear();
     for(int c = 0; c < 1000; c++)
     {
         m_port.waitForReadyRead(1);
@@ -826,7 +1295,10 @@ void QLpcProg::chipProgram(QByteArray chunk, int offset)
         log_write(line);
     }
 
+    m_port.waitForBytesWritten(-1);
+
     recieved.clear();
+    line.clear();
     for(int c = 0; c < 1000; c++)
     {
         m_port.waitForReadyRead(1);
@@ -861,7 +1333,10 @@ void QLpcProg::chipProgram(QByteArray chunk, int offset)
     m_port.write(QByteArray::number(encodeUUCheckSum(chunk2)).append("\r\n"));
     log_write(QByteArray::number(encodeUUCheckSum(chunk2)).append("\r\n"));
 
+    m_port.waitForBytesWritten(-1);
+
     recieved.clear();
+    line.clear();
     for(int c = 0; c < 1000; c++)
     {
         m_port.waitForReadyRead(1);
@@ -893,45 +1368,13 @@ void QLpcProg::chipProgram(QByteArray chunk, int offset)
         return;
     }
 
-    m_port.write("P 0 26\r\n"); // TODO: Hardcoded 26(will only work with LPC2148)
-    log_write("P 0 26\r\n"); // TODO: Hardcoded 26(will only work with LPC2148)
+    m_port.write(QString("M " + QByteArray::number(offset) + " 1073742336 " + QString::number(orig_size) + "\r\n").toLatin1());
+    log_write(QString("M " + QByteArray::number(offset) + " 1073742336 " + QString::number(orig_size) + "\r\n").toLatin1());
+
+    m_port.waitForBytesWritten(-1);
 
     recieved.clear();
-    for(int c = 0; c < 1000; c++)
-    {
-        m_port.waitForReadyRead(1);
-        recieved.append(m_port.readAll());
-
-        QList<QByteArray> lines = recieved.split('\n');
-
-        if ((lines.count() >= 3)&&(m_EchoOn == true))
-        {
-            line = lines[1];
-            line.chop(1);
-
-            break;
-        }
-        if ((lines.count() >= 2)&&(m_EchoOn == false))
-        {
-            line = lines[0];
-            line.chop(1);
-
-            break;
-        }
-    }
-
-    if (line != "0")
-    {
-        m_status = StatusError;
-        m_statusText = tr("Wrong data recieved(%1).").arg(QString(line));
-
-        return;
-    }
-
-    m_port.write("C " + QByteArray::number(offset) + " 1073742336 1024\r\n");
-    log_write("C " + QByteArray::number(offset) + " 1073742336 1024\r\n");
-
-    recieved.clear();
+    line.clear();
     for(int c = 0; c < 1000; c++)
     {
         m_port.waitForReadyRead(1);
@@ -1047,11 +1490,13 @@ int QLpcProg::encodeUUCheckSum(const QByteArray &data)
 
 void QLpcProg::log_write(const QByteArray &data)
 {
+#ifdef QT_NO_DEBUG
     Q_UNUSED(data);
-
-    /*QFile log("write.log");
+#else
+    QFile log("write.log");
 
     log.open(QIODevice::Append);
 
-    log.write(data);*/
+    log.write(data);
+#endif
 }

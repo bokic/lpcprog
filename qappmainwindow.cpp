@@ -8,6 +8,7 @@
 #include <QMessageBox>
 #include <QSettings>
 
+
 #define STATUSBAR_TIMEOUT 2000
 
 
@@ -68,7 +69,6 @@ void QAppMainWindow::updateSerialPorts()
             ui->ports_comboBox->addItem(ports.at(c));
         }
     }
-
 }
 
 void QAppMainWindow::on_chipID_pushButton_clicked()
@@ -288,6 +288,8 @@ void QAppMainWindow::on_fileOperation_pushButton_clicked()
 {
     const QString &file = ui->file_lineEdit->text();
 
+    ui->fileOperation_pushButton->setEnabled(false);
+
     if (ui->fileProgram_radioButton->isChecked())
     {
         fileProgram(file);
@@ -304,6 +306,8 @@ void QAppMainWindow::on_fileOperation_pushButton_clicked()
     {
         QMessageBox::critical(this, tr("Error"), tr("Unknown Error."));
     }
+
+    ui->fileOperation_pushButton->setEnabled(true);
 }
 
 void QAppMainWindow::on_erase_pushButton_clicked()
@@ -399,6 +403,103 @@ void QAppMainWindow::on_erase_pushButton_clicked()
     ui->statusbar->clearMessage();
 }
 
+void QAppMainWindow::on_blankCheck_pushButton_clicked()
+{
+    QLpcProg prog;
+
+    if (ui->ports_comboBox->currentIndex() == -1)
+    {
+        return;
+    }
+
+    ui->statusbar->showMessage(tr("Opening serial port."), STATUSBAR_TIMEOUT);
+    QApplication::processEvents();
+
+    prog.init(ui->ports_comboBox->currentText());
+    switch (prog.getStatus())
+    {
+    case QLpcProg::StatusNoError:
+        break;
+    case QLpcProg::StatusTimeOut:
+        QMessageBox::critical(this, tr("Error"), tr("LPC initialization timeout."));
+        return;
+    case QLpcProg::StatusError:
+        QMessageBox::critical(this, tr("Error"), tr("LPC could\'t be initialized.\n Error string: %1.").arg(prog.getStatusText()));
+        return;
+    default:
+        QMessageBox::critical(this, tr("Error"), tr("LPC could\'t be initialized(unknown error type).\n Error string: %1.").arg(prog.getStatusText()));
+        return;
+    }
+
+    ui->statusbar->showMessage(tr("Set Crystal value."), STATUSBAR_TIMEOUT);
+    QApplication::processEvents();
+
+    prog.setCrystalValue(ui->crystal_spinBox->value());
+    switch (prog.getStatus())
+    {
+    case QLpcProg::StatusNoError:
+        break;
+    case QLpcProg::StatusTimeOut:
+        QMessageBox::critical(this, tr("Error"), tr("LPC set crystal value timeout."));
+        return;
+    case QLpcProg::StatusError:
+        QMessageBox::critical(this, tr("Error"), tr("LPC could\'t set crystal value.\n Error string: %1.").arg(prog.getStatusText()));
+        return;
+    default:
+        QMessageBox::critical(this, tr("Error"), tr("LPC could\'t set crystal value(unknown error type).\n Error string: %1.").arg(prog.getStatusText()));
+        return;
+    }
+
+    ui->statusbar->showMessage(tr("Disable echo."), STATUSBAR_TIMEOUT);
+    QApplication::processEvents();
+
+    prog.setEcho(false);
+    switch (prog.getStatus())
+    {
+    case QLpcProg::StatusNoError:
+        break;
+    case QLpcProg::StatusTimeOut:
+        QMessageBox::critical(this, tr("Error"), tr("LPC disable echo timeout."));
+        return;
+    case QLpcProg::StatusError:
+        QMessageBox::critical(this, tr("Error"), tr("LPC disable echo failed.\n Error string: %1.").arg(prog.getStatusText()));
+        return;
+    default:
+        QMessageBox::critical(this, tr("Error"), tr("LPC disable echo failed(unknown error type).\n Error string: %1.").arg(prog.getStatusText()));
+        return;
+    }
+
+    ui->statusbar->showMessage(tr("Blank Check."), STATUSBAR_TIMEOUT);
+    QApplication::processEvents();
+
+    bool is_blank = prog.chipBlankCheck();
+    switch (prog.getStatus())
+    {
+    case QLpcProg::StatusNoError:
+        break;
+    case QLpcProg::StatusTimeOut:
+        QMessageBox::critical(this, tr("Error"), tr("LPC chip erase timeout."));
+        return;
+    case QLpcProg::StatusError:
+        QMessageBox::critical(this, tr("Error"), tr("LPC chip erase failed.\n Error string: %1.").arg(prog.getStatusText()));
+        return;
+    default:
+        QMessageBox::critical(this, tr("Error"), tr("LPC chip erase failed(unknown error type).\n Error string: %1.").arg(prog.getStatusText()));
+        return;
+    }
+
+    ui->statusbar->clearMessage();
+
+    if (is_blank)
+    {
+        QMessageBox::warning(this, tr("Info"), tr("LPC chip <b>IS</b> blank."));
+    }
+    else
+    {
+        QMessageBox::warning(this, tr("Warning"), tr("LPC chip <b>IS NOT</b> blank."));
+    }
+}
+
 void QAppMainWindow::on_read_pushButton_clicked()
 {
 
@@ -428,7 +529,6 @@ void QAppMainWindow::fileProgram(const QString &file)
         return;
     }
 
-    // Read file
     QHexLoader loader;
 
     if (loader.load(file) == false)
@@ -452,8 +552,6 @@ void QAppMainWindow::fileProgram(const QString &file)
         return;
     }
 
-
-    // chip erase
     QLpcProg prog;
 
     ui->statusbar->showMessage(tr("Opening serial port."), STATUSBAR_TIMEOUT);
@@ -548,7 +646,7 @@ void QAppMainWindow::fileProgram(const QString &file)
         return;
     }
 
-    prog.unlock();
+    /*prog.unlock();
     switch (prog.getStatus())
     {
     case QLpcProg::StatusNoError:
@@ -562,7 +660,7 @@ void QAppMainWindow::fileProgram(const QString &file)
     default:
         QMessageBox::critical(this, tr("Error"), tr("LPC unlock failed(unknown error type).\n Error string: %1.").arg(prog.getStatusText()));
         return;
-    }
+    }*/
 
     // patch the firmware.
     prog.patchFirmware(data);
@@ -590,15 +688,162 @@ void QAppMainWindow::fileProgram(const QString &file)
     prog.deinit();
 
     ui->statusbar->clearMessage();
-    QMessageBox::information(this, tr("Error"), tr("Chip is programmed successfully."));
+    QMessageBox::information(this, tr("Info"), tr("Chip firmware is programmed successfully."));
 }
 
 void QAppMainWindow::fileVerify(const QString &file)
 {
-    Q_UNUSED(file);
+    if (ui->ports_comboBox->currentIndex() == -1)
+    {
+        return;
+    }
+
     // Read file
+    QHexLoader loader;
+
+    if (loader.load(file) == false)
+    {
+        QMessageBox::critical(this, tr("Error"), tr("Error loading hex file."));
+
+        return;
+    }
+
+    QByteArray data = loader.data();
+
+    if (data.isEmpty())
+    {
+        QMessageBox::critical(this, tr("Error"), tr("Error loading hex file."));
+
+        return;
+    }
+
+    // chip erase
+    QLpcProg prog;
+
+    ui->statusbar->showMessage(tr("Opening serial port."), STATUSBAR_TIMEOUT);
+    QApplication::processEvents();
+
+    prog.init(ui->ports_comboBox->currentText());
+    switch (prog.getStatus())
+    {
+    case QLpcProg::StatusNoError:
+        break;
+    case QLpcProg::StatusTimeOut:
+        QMessageBox::critical(this, tr("Error"), tr("LPC initialization timeout."));
+        return;
+    case QLpcProg::StatusError:
+        QMessageBox::critical(this, tr("Error"), tr("LPC could\'t be initialized.\n Error string: %1.").arg(prog.getStatusText()));
+        return;
+    default:
+        QMessageBox::critical(this, tr("Error"), tr("LPC could\'t be initialized(unknown error type).\n Error string: %1.").arg(prog.getStatusText()));
+        return;
+    }
+
+    ui->statusbar->showMessage(tr("Set Crystal value."), STATUSBAR_TIMEOUT);
+    QApplication::processEvents();
+
+    prog.setCrystalValue(ui->crystal_spinBox->value());
+    switch (prog.getStatus())
+    {
+    case QLpcProg::StatusNoError:
+        break;
+    case QLpcProg::StatusTimeOut:
+        QMessageBox::critical(this, tr("Error"), tr("LPC set crystal value timeout."));
+        return;
+    case QLpcProg::StatusError:
+        QMessageBox::critical(this, tr("Error"), tr("LPC could\'t set crystal value.\n Error string: %1.").arg(prog.getStatusText()));
+        return;
+    default:
+        QMessageBox::critical(this, tr("Error"), tr("LPC could\'t set crystal value(unknown error type).\n Error string: %1.").arg(prog.getStatusText()));
+        return;
+    }
+
+    ui->statusbar->showMessage(tr("Disable echo."), STATUSBAR_TIMEOUT);
+    QApplication::processEvents();
+
+    prog.setEcho(false);
+    switch (prog.getStatus())
+    {
+    case QLpcProg::StatusNoError:
+        break;
+    case QLpcProg::StatusTimeOut:
+        QMessageBox::critical(this, tr("Error"), tr("LPC disable echo timeout."));
+        return;
+    case QLpcProg::StatusError:
+        QMessageBox::critical(this, tr("Error"), tr("LPC disable echo failed.\n Error string: %1.").arg(prog.getStatusText()));
+        return;
+    default:
+        QMessageBox::critical(this, tr("Error"), tr("LPC disable echo failed(unknown error type).\n Error string: %1.").arg(prog.getStatusText()));
+        return;
+    }
+
+    /*prog.setBaudRate(9600);
+    switch (prog.getStatus())
+    {
+    case QLpcProg::StatusNoError:
+        break;
+    case QLpcProg::StatusTimeOut:
+        QMessageBox::critical(this, tr("Error"), tr("LPC set BaudRate timeout."));
+        return;
+    case QLpcProg::StatusError:
+        QMessageBox::critical(this, tr("Error"), tr("LPC set BaudRate failed.\n Error string: %1.").arg(prog.getStatusText()));
+        return;
+    default:
+        QMessageBox::critical(this, tr("Error"), tr("LPC set BaudRate failed(unknown error type).\n Error string: %1.").arg(prog.getStatusText()));
+        return;
+    }*/
+
+    prog.unlock();
+    switch (prog.getStatus())
+    {
+    case QLpcProg::StatusNoError:
+        break;
+    case QLpcProg::StatusTimeOut:
+        QMessageBox::critical(this, tr("Error"), tr("LPC unlock timeout."));
+        return;
+    case QLpcProg::StatusError:
+        QMessageBox::critical(this, tr("Error"), tr("LPC unlock failed.\n Error string: %1.").arg(prog.getStatusText()));
+        return;
+    default:
+        QMessageBox::critical(this, tr("Error"), tr("LPC unlock failed(unknown error type).\n Error string: %1.").arg(prog.getStatusText()));
+        return;
+    }
+
+    // patch the firmware.
+    prog.patchFirmware(data);
 
     // verify 1024byte blocks.
+    int chunks = data.length() / 1024;
+    if (data.length() % 1024) chunks++;
+
+    for(int c = 0; c < chunks; c++)
+    {
+        ui->statusbar->showMessage(tr("Verify (%1% complete).").arg(((chunks - c - 1) * 100) / chunks), STATUSBAR_TIMEOUT);
+        QApplication::processEvents();
+
+        if (c != 0) // Do not verify first 32 bytes.
+        {
+            QByteArray chunk = data.mid(c * 1024, 1024);
+            prog.chipVerify(chunk, c * 1024);
+        }
+        else
+        {
+            QByteArray chunk = data.mid(64, 1024 - 64);
+            prog.chipVerify(chunk, 64);
+        }
+
+        if (prog.getStatus() != QLpcProg::StatusNoError)
+        {
+            QMessageBox::critical(this, tr("Error"), tr("Verify failed."));
+
+            return;
+        }
+    }
+
+    prog.deinit();
+
+    ui->statusbar->clearMessage();
+    QMessageBox::information(this, tr("Info"), tr("Chip firmware is successfully verified with file."));
 }
 
 void QAppMainWindow::fileDecompile(const QString &file)
