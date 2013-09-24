@@ -41,6 +41,7 @@ signals:
 public slots:
 
 private:
+    void sendRecieve(const QByteArray &send, int lines, const QByteArray shouldRecieve);
     QList<QByteArray> encodeUU(const QByteArray &data);
     int encodeUUCheckSum(const QByteArray &data);
     void log_write(const QByteArray &data);

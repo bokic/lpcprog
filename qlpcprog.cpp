@@ -1,6 +1,7 @@
 #include "qlpcprog.h"
 
 #include <qserialportinfo.h>
+#include <QDateTime>
 #include <QFile>
 
 #ifdef Q_OS_WIN
@@ -9,8 +10,18 @@
 #include <unistd.h>
 #endif
 
-static const char SYNCHRONIZED[] = "Synchronized\r\n";
+static const char SYNCHRONIZED[] = "Synchronized";
+static const char SYNCHRONIZED_CRNL[] = "Synchronized\r\n";
 static const char SYNCHRONIZED_OK[] = "Synchronized\r\nOK\r\n";
+
+#define PORT_OPEN_CHECK(ret) \
+    if (!m_port.isOpen()) \
+    { \
+        m_status = StatusError; \
+        m_statusText = tr("Comm port is not open."); \
+      \
+        return ret; \
+    }
 
 
 QLpcProg::QLpcProg(QObject *parent) :
@@ -39,10 +50,77 @@ QStringList QLpcProg::detectSerialPorts()
     return ret;
 }
 
-void QLpcProg::init(const QString &port)
+void QLpcProg::sendRecieve(const QByteArray &send, int lines, const QByteArray shouldRecieve)
 {
     QByteArray recieved;
 
+    if (lines < 1)
+    {
+        m_status = StatusError;
+        m_statusText = tr("Invalid function parametar.");
+
+        return;
+    }
+
+    m_port.write(send);
+    log_write("SEND - " + send);
+    for(int c = 0; c < 1000; c++)
+    {
+        m_port.waitForReadyRead(1);
+        recieved.append(m_port.readAll());
+
+        if (recieved.endsWith("\r\n"))
+        {
+            QList<QByteArray> recieved_lines = recieved.split('\n');
+
+            if (recieved_lines.count() <= lines)
+            {
+                continue;
+            }
+            else if (recieved_lines.count() > lines + 1)
+            {
+                m_status = StatusError;
+                m_statusText = tr("Too much data returned.");
+
+                log_write("RECIEVE - " + recieved);
+
+                return;
+            }
+            else
+            {
+                QByteArray ret = recieved_lines.at(lines - 1);
+
+                ret = ret.left(ret.length() - 1); // remove \r
+
+                log_write("RECIEVE - " + recieved);
+
+                if (ret != shouldRecieve)
+                {
+                    m_status = StatusError;
+                    m_statusText = tr("Too much data returned.");
+
+                }
+                else
+                {
+                    m_status = StatusNoError;
+                    m_statusText.clear();
+                }
+
+                return;
+            }
+
+            break;
+        }
+    }
+
+    m_status = StatusTimeOut;
+    m_statusText.clear();
+
+    log_write("RECIEVE - " + recieved);
+}
+
+void QLpcProg::init(const QString &port)
+{
     deinit();
 
     m_port.setPortName(port);
@@ -81,55 +159,12 @@ void QLpcProg::init(const QString &port)
     m_port.waitForReadyRead(100);
     m_port.readAll();
 
-    m_port.write("?");
-    log_write("?");
+    sendRecieve("?", 1, SYNCHRONIZED);
+    if (m_status != StatusNoError) return;
 
-    m_port.waitForBytesWritten(-1);
 
-    recieved.clear();
-    for(int c = 0; c < 1000; c++)
-    {
-        m_port.waitForReadyRead(1);
-        recieved.append(m_port.readAll());
-
-        if (recieved.count() >= (int)(sizeof(SYNCHRONIZED) - 1))
-        {
-            break;
-        }
-    }
-
-    if (recieved != SYNCHRONIZED)
-    {
-        m_status = StatusError;
-        m_statusText = tr("Wrong data recieved.");
-
-        return;
-    }
-
-    m_port.write(SYNCHRONIZED);
-    log_write(SYNCHRONIZED);
-    recieved.clear();
-    for(int c = 0; c < 1000; c++)
-    {
-        m_port.waitForReadyRead(1);
-        recieved.append(m_port.readAll());
-
-        if (recieved.count() >= (int)(sizeof(SYNCHRONIZED_OK) - 1))
-        {
-            break;
-        }
-    }
-
-    if (recieved != SYNCHRONIZED_OK)
-    {
-        m_status = StatusError;
-        m_statusText = tr("Wrong data recieved.");
-
-        return;
-    }
-
-    m_status = StatusNoError;
-    m_statusText.clear();
+    sendRecieve(SYNCHRONIZED_CRNL, 2, "OK");
+    if (m_status != StatusNoError) return;
 }
 
 void QLpcProg::deinit()
@@ -159,97 +194,38 @@ void QLpcProg::deinit()
 
 void QLpcProg::setCrystalValue(int value)
 {
-    if (!m_port.isOpen())
-    {
-        m_status = StatusError;
-        m_statusText = tr("Comm port is not open.");
+    QByteArray command;
 
-        return;
-    }
+    PORT_OPEN_CHECK();
 
-    QByteArray send = QByteArray::number(value).append("\r\n");
-    QByteArray shouldRecieve;
-    QByteArray recieved;
+    command = QByteArray::number(value) + "\r\n";
 
     if (m_EchoOn)
     {
-        shouldRecieve = send + "OK\r\n";
+        sendRecieve(command, 2, "OK");
     }
     else
     {
-        shouldRecieve = "OK\r\n";
+        sendRecieve(command, 1, "OK");
     }
-
-    m_port.write(send);
-    log_write(send);
-    for(int c = 0; c < 1000; c++)
-    {
-        m_port.waitForReadyRead(1);
-        recieved.append(m_port.readAll());
-
-        if (recieved.count() >= shouldRecieve.count())
-        {
-            break;
-        }
-    }
-
-    if (recieved != shouldRecieve)
-    {
-        m_status = StatusError;
-        m_statusText = tr("Wrong data recieved.");
-
-        return;
-    }
-
-    m_status = StatusNoError;
-    m_statusText.clear();
 }
 
 void QLpcProg::setBaudRate(int baudRate)
 {
-    if (!m_port.isOpen())
-    {
-        m_status = StatusError;
-        m_statusText = tr("Comm port is not open.");
+    QByteArray command;
 
-        return;
+    PORT_OPEN_CHECK();
+
+    if (m_EchoOn)
+    {
+        sendRecieve(command, 2, "0");
+    }
+    else
+    {
+        sendRecieve(command, 1, "0");
     }
 
-    QByteArray recieved;
-    QByteArray line;
-
-    m_port.write("B " + QByteArray::number(baudRate) + " 2\r\n");
-    log_write("B " + QByteArray::number(baudRate) + " 2\r\n");
-    for(int c = 0; c < 1000; c++)
-    {
-        m_port.waitForReadyRead(1);
-        recieved.append(m_port.readAll());
-
-        QList<QByteArray> lines = recieved.split('\n');
-
-        if ((lines.count() >= 3)&&(m_EchoOn == true))
-        {
-            line = lines[1];
-            line.chop(1);
-
-            break;
-        }
-        if ((lines.count() >= 2)&&(m_EchoOn == false))
-        {
-            line = lines[0];
-            line.chop(1);
-
-            break;
-        }
-    }
-
-    if (line != "0")
-    {
-        m_status = StatusError;
-        m_statusText = tr("Wrong data recieved(%1).").arg(QString(line));
-
-        return;
-    }
+    if (m_status != StatusNoError) return;
 
     if (m_port.setBaudRate(baudRate) == false)
     {
@@ -258,90 +234,28 @@ void QLpcProg::setBaudRate(int baudRate)
 
         return;
     }
-
-    m_status = StatusNoError;
-    m_statusText.clear();
 }
 
 void QLpcProg::setEcho(bool echo)
 {
-    if (!m_port.isOpen())
-    {
-        m_status = StatusError;
-        m_statusText = tr("Comm port is not open.");
-
-        return;
-    }
-
-    QByteArray recieved;
-    QList<QByteArray> lines;
-    QByteArray line;
+    PORT_OPEN_CHECK();
 
     if (echo != m_EchoOn)
     {
+        QByteArray command;
+
         if (echo)
         {
-            m_port.write("A 1\r\n");
-            log_write("A 1\r\n");
+            command = "A 1\r\n";
         }
         else
         {
-            m_port.write("A 0\r\n");
-            log_write("A 0\r\n");
+            command = "A 0\r\n";
         }
 
-        for(int c = 0; c < 1000; c++)
-        {
-            m_port.waitForReadyRead(1);
-            recieved.append(m_port.readAll());
+        sendRecieve(command, 1, "0");
 
-            lines = recieved.split('\n');
-
-            if ((lines.count() == 3)&&(m_EchoOn == true))
-            {
-                line = lines.at(1);
-                line.chop(1); // chop \r
-
-                if (line == "0")
-                {
-                    m_EchoOn = !m_EchoOn;
-
-                    m_status = StatusNoError;
-                    m_statusText.clear();
-
-                    return;
-                }
-
-                m_status = StatusError;
-                m_statusText = tr("Wrong data recieved.");
-
-                return;
-            }
-
-            if ((lines.count() == 2)&&(m_EchoOn == false))
-            {
-                line = lines.at(0);
-                line.chop(1); // chop \r
-
-                if (line == "0")
-                {
-                    m_EchoOn = !m_EchoOn;
-
-                    m_status = StatusNoError;
-                    m_statusText.clear();
-
-                    return;
-                }
-
-                m_status = StatusError;
-                m_statusText = tr("Wrong data recieved.");
-
-                return;
-            }
-        }
-
-        m_status = StatusTimeOut;
-        m_statusText = tr("Data Timeout.");
+        m_EchoOn = echo;
 
         return;
     }
@@ -352,13 +266,7 @@ void QLpcProg::setEcho(bool echo)
 
 int QLpcProg::readPartID()
 {
-    if (!m_port.isOpen())
-    {
-        m_status = StatusError;
-        m_statusText = tr("Comm port is not open.");
-
-        return 0;
-    }
+    PORT_OPEN_CHECK(0);
 
     QByteArray send = "J\r\n";
     QByteArray recieved;
@@ -427,13 +335,7 @@ int QLpcProg::readPartID()
 
 QString QLpcProg::readBootCodeVersion()
 {
-    if (!m_port.isOpen())
-    {
-        m_status = StatusError;
-        m_statusText = tr("Comm port is not open.");
-
-        return QString();
-    }
+    PORT_OPEN_CHECK(QString());
 
     QByteArray send = "K\r\n";
     QByteArray recieved;
@@ -471,13 +373,7 @@ QString QLpcProg::readBootCodeVersion()
 
 void QLpcProg::unlock()
 {
-    if (!m_port.isOpen())
-    {
-        m_status = StatusError;
-        m_statusText = tr("Comm port is not open.");
-
-        return;
-    }
+    PORT_OPEN_CHECK();
 
     QByteArray recieved;
     QByteArray line;
@@ -518,13 +414,7 @@ void QLpcProg::unlock()
 
 void QLpcProg::chipErase()
 {
-    if (!m_port.isOpen())
-    {
-        m_status = StatusError;
-        m_statusText = tr("Comm port is not open.");
-
-        return;
-    }
+    PORT_OPEN_CHECK();
 
     QByteArray recieved;
     QByteArray send;
@@ -633,13 +523,7 @@ void QLpcProg::chipErase()
 
 bool QLpcProg::chipBlankCheck()
 {
-    if (!m_port.isOpen())
-    {
-        m_status = StatusError;
-        m_statusText = tr("Comm port is not open.");
-
-        return false;
-    }
+    PORT_OPEN_CHECK(false);
 
     QByteArray recieved;
     QByteArray send;
@@ -735,13 +619,7 @@ void QLpcProg::patchFirmware(QByteArray &data)
 
 void QLpcProg::chipProgram(QByteArray chunk, int offset)
 {
-    if (!m_port.isOpen())
-    {
-        m_status = StatusError;
-        m_statusText = tr("Comm port is not open.");
-
-        return;
-    }
+    PORT_OPEN_CHECK();
 
     if (chunk.length() > 1024)
     {
@@ -1017,15 +895,9 @@ void QLpcProg::chipProgram(QByteArray chunk, int offset)
 
 void QLpcProg::chipVerify(QByteArray chunk, int offset)
 {
+    PORT_OPEN_CHECK();
+
     int orig_size = chunk.length();
-
-    if (!m_port.isOpen())
-    {
-        m_status = StatusError;
-        m_statusText = tr("Comm port is not open.");
-
-        return;
-    }
 
     if (chunk.length() > 1024)
     {
@@ -1418,6 +1290,12 @@ void QLpcProg::log_write(const QByteArray &data)
 
     log.open(QIODevice::Append);
 
-    log.write(data);
+    log.write(QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz").toUtf8() + " - " + data);
+
+    if (!data.endsWith("\r\n"))
+    {
+        log.write("\r\n");
+    }
+
 #endif
 }
